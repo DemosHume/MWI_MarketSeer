@@ -6,11 +6,16 @@ from tqdm import tqdm
 from model import DualHeadBiLSTM
 from data import PriceDataset
 
-def train_model(x_data, y_data, input_size, n_future, device):
+def train_model(x_data, y_data, input_size, n_future, device, model=None):
+    from data import PriceDataset
+    from model import DualHeadBiLSTM
+
     dataset = PriceDataset(x_data, y_data)
     loader = DataLoader(dataset, batch_size=64, shuffle=True)
 
-    model = DualHeadBiLSTM(input_size, output_size=n_future).to(device)
+    if model is None:
+        model = DualHeadBiLSTM(input_size, output_size=n_future).to(device)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     mse_loss = nn.MSELoss()
     bce_loss = nn.BCELoss()
@@ -30,3 +35,4 @@ def train_model(x_data, y_data, input_size, n_future, device):
 
     torch.save(model.state_dict(), 'model.pth')
     return model
+
