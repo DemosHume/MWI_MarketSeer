@@ -9,5 +9,7 @@ tsconfig.json
 cookies.json
 clean_history.sh
 cronjob.log
+/.cadence
+/.idea
 .idea
 /.cadence
