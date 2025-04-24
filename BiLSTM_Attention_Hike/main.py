@@ -44,7 +44,13 @@ if MODE in ['train', 'continue']:
     else:
         print("Starting fresh training.")
 
-    model = train_model(x_data, y_data, input_size=input_size, n_future=n_future, device=device, model=model,epoch=300,lr=0.01)
+    model = train_model(x_data, y_data,
+                        input_size=input_size,
+                        n_future=n_future,
+                        device=device,
+                        model=model,
+                        epoch=300,
+                        lr=0.001)
 
 elif MODE == 'predict':
     model = load_model(input_size=input_size, output_size=n_future, device=device)
