@@ -12,7 +12,7 @@ class Attention(nn.Module):
         return context
 
 class DualHeadBiLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size=256, output_size=2, num_layers=3, dropout=0.3):
+    def __init__(self, input_size, hidden_size=1024, output_size=2, num_layers=5, dropout=0.3):
         super().__init__()
 
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers,
@@ -24,6 +24,7 @@ class DualHeadBiLSTM(nn.Module):
 
         self.reg_head = nn.Sequential(
             nn.Linear(hidden_size * 2, hidden_size),
+            nn.BatchNorm1d(hidden_size),  # 添加BatchNorm层
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, output_size * input_size)
@@ -31,6 +32,7 @@ class DualHeadBiLSTM(nn.Module):
 
         self.cls_head = nn.Sequential(
             nn.Linear(hidden_size * 2, hidden_size),
+            nn.BatchNorm1d(hidden_size),  # 添加BatchNorm层
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, input_size),
