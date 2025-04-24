@@ -41,17 +41,6 @@ ask_data = ask_data.loc[:, (max_values < 1e6) | (ask_data.columns == 'time')]
 # 删除完全相同的列
 ask_data = ask_data.loc[:, ~ask_data.T.duplicated()]
 
-
-import matplotlib.pyplot as plt
-
-ask_data['total_price_list'] = ask_data.drop('time', axis=1).sum(axis=1)
-plt.plot(ask_data['total_price_list'])
-plt.title("Total Price Trend")
-plt.savefig('total_price_trend.png')
-plt.close()
-
-
-
 from sklearn.preprocessing import StandardScaler
 
 df = ask_data.copy()
