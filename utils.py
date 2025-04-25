@@ -44,7 +44,10 @@ def read_stored_hash(file_path):
 
 def store_hash(file_path, hash_value):
     """将当前仓库的 commit hash 存储到 JSON 文件"""
-    data = {'commit_hash': hash_value}
+    data = {
+        'commit_hash': hash_value,
+        'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
     with open(file_path, 'w') as f:
         json.dump(data, f, indent=4)
 
@@ -92,4 +95,3 @@ def refresh_market_data():
     print("更新完成 ✅")
     latest_time = query('SELECT time FROM ask ORDER BY time DESC LIMIT 1')['time'].iloc[0]
     print(f"最新数据\t北京时间: {timestamp_to_beijing_time(latest_time)}")
-
