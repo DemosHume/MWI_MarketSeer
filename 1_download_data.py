@@ -17,6 +17,9 @@ OSS_ENDPOINT = 'oss-cn-shanghai.aliyuncs.com'
 LOCAL_TEMP_DIR = 'data/temp_daily'  # 临时存放下载的压缩包
 FINAL_CSV_PATH = 'data/market_history.csv'  # 最终生成的单一整合大文件
 
+# 数据保留配置
+MAX_TIMESTAMPS = 500  # 至多保留最近多少个时间戳的数据，设置为 None 则保留所有
+
 
 # ===========================================
 
@@ -109,12 +112,24 @@ def download_and_merge():
     # 按时间排序，保证数据连贯
     full_df = full_df.sort_values('timestamp')
 
+    # 3.5 限制时间戳数量
+    unique_timestamps = full_df['timestamp'].unique()
+    total_timestamps = len(unique_timestamps)
+
+    if MAX_TIMESTAMPS is not None and total_timestamps > MAX_TIMESTAMPS:
+        print(f"检测到 {total_timestamps} 个时间戳，限制保留最近 {MAX_TIMESTAMPS} 个...")
+        # 获取最近的 N 个时间戳
+        keep_timestamps = unique_timestamps[-MAX_TIMESTAMPS:]
+        full_df = full_df[full_df['timestamp'].isin(keep_timestamps)]
+        total_timestamps = len(keep_timestamps)
+
     # 4. 保存为单一 CSV
     print(f"正在保存到 {FINAL_CSV_PATH} ...")
     full_df.to_csv(FINAL_CSV_PATH, index=False)
 
     file_size_mb = os.path.getsize(FINAL_CSV_PATH) / (1024 * 1024)
     print(Fore.GREEN + f"✅ 处理完成！")
+    print(Fore.GREEN + f"有效时间戳数量: {total_timestamps}")
     print(Fore.GREEN + f"总行数: {len(full_df)}")
     print(Fore.GREEN + f"文件大小: {file_size_mb:.2f} MB")
     print(Fore.GREEN + f"路径: {os.path.abspath(FINAL_CSV_PATH)}")
