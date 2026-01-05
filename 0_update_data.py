@@ -7,134 +7,106 @@ import oss2
 from datetime import datetime
 
 # ================= 配置区域 =================
-
-# 1. 本地文件名
-LOCAL_FILE = 'market_history.csv'
-
-# 2. 阿里云 OSS 配置
 # 从环境变量获取 AK/SK
 OSS_AK = os.getenv('demos_oss_ak')
 OSS_SK = os.getenv('demos_oss_sk')
 
-# 【请修改这里】你的 Bucket 名字
-OSS_BUCKET_NAME = 'milky-way-idle-oss'
+OSS_BUCKET_NAME = 'milky-way-idle-oss'  # 你的 Bucket
+OSS_ENDPOINT = 'oss-cn-shanghai.aliyuncs.com'  # 你的 Endpoint
 
-# 【请修改这里】你的 Endpoint (例如杭州是 oss-cn-hangzhou.aliyuncs.com)
-OSS_ENDPOINT = 'oss-cn-shanghai.aliyuncs.com'
-
-# OSS 上保存的文件路径 (Key)
-OSS_OBJECT_KEY = 'milkyway/market_history.csv'
-
-# 3. 游戏 API 地址
 MARKET_API_URL = "https://www.milkywayidle.com/game_data/marketplace.json"
+
+# 【新配置】本地数据存放文件夹名称
+LOCAL_DATA_DIR = 'market_data'
 
 
 # ===========================================
 
-def upload_to_oss(local_path):
-    """
-    将文件上传到阿里云 OSS
-    """
+def upload_to_oss(local_path, oss_path):
+    """上传文件到 OSS"""
     if not OSS_AK or not OSS_SK:
-        print(">>> [OSS Error] 环境变量 demos_oss_ak 或 demos_oss_sk 未设置，跳过上传。")
         return
-
     try:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Uploading to OSS: {OSS_OBJECT_KEY} ...")
-
-        # 1. 认证
         auth = oss2.Auth(OSS_AK, OSS_SK)
-
-        # 2. 初始化 Bucket
         bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET_NAME)
-
-        # 3. 上传文件 (put_object_from_file 适合中小文件，如果文件超大可用 multipart)
-        bucket.put_object_from_file(OSS_OBJECT_KEY, local_path)
-
-        print(f">>> [OSS Success] Upload completed.")
-
-    except oss2.exceptions.OssError as e:
-        print(f">>> [OSS Error] {e.message}")
+        bucket.put_object_from_file(oss_path, local_path)
     except Exception as e:
         print(f">>> [OSS Error] {e}")
 
 
 def fetch_and_store_data():
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now_str}] Fetching market data...")
+    now = datetime.now()
+    date_str = now.strftime('%Y-%m-%d')
+
+    # 1. 确保目录存在
+    if not os.path.exists(LOCAL_DATA_DIR):
+        os.makedirs(LOCAL_DATA_DIR)
+
+    # 2. 构造文件名和完整路径
+    # 文件名: market_2026-01-05.csv.gz
+    filename = f"market_{date_str}.csv.gz"
+    # 路径: market_data/market_2026-01-05.csv.gz
+    local_full_path = os.path.join(LOCAL_DATA_DIR, filename)
+
+    print(f"[{now.strftime('%H:%M:%S')}] Fetching...", end=" ")
 
     try:
-        # 1. 请求接口
-        response = requests.get(MARKET_API_URL, timeout=30)
+        response = requests.get(MARKET_API_URL, timeout=10)
         data = response.json()
-
         market_data = data.get("marketData", {})
         timestamp = data.get("timestamp")
 
-        if not market_data or not timestamp:
-            print("No data received.")
+        if not market_data:
+            print("Empty data.")
             return
 
-        dt_record = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-
-        # 2. 解析数据 (转为长表格式)
         records = []
         for item_key, levels in market_data.items():
             clean_name = item_key.replace("/items/", "")
             for level, prices in levels.items():
-                # 同时获取 a (ask) 和 b (bid)
-                # 如果没有挂单，API可能不返回 key，这里默认给 -1
-                ask = prices.get('a', -1)
-                bid = prices.get('b', -1)
-
                 records.append({
-                    "timestamp": timestamp,
-                    "datetime": dt_record,
-                    "item": clean_name,
-                    "level": int(level),
-                    "ask": ask,  # 卖一价
-                    "bid": bid  # 买一价
+                    "t": timestamp,
+                    "i": clean_name,
+                    "l": int(level),
+                    "a": prices.get('a', -1),
+                    "b": prices.get('b', -1)
                 })
 
-        if not records:
-            return
+        if not records: return
 
         new_df = pd.DataFrame(records)
 
-        # 3. 追加写入 CSV (高效写入)
-        # 如果文件不存在，写入表头；如果存在，不写入表头直接追加
-        file_exists = os.path.isfile(LOCAL_FILE)
+        # 检查文件是否存在（决定是否写表头）
+        file_exists = os.path.isfile(local_full_path)
 
+        # 3. 写入到指定目录下的文件中
         new_df.to_csv(
-            LOCAL_FILE,
+            local_full_path,
             mode='a',
             header=not file_exists,
-            index=False
+            index=False,
+            compression='gzip'
         )
 
-        print(f"[{now_str}] Saved {len(records)} rows locally.")
+        print(f"Saved {len(records)} rows to {local_full_path}.")
 
-        # 4. 触发 OSS 上传
-        # 注意：这里是同步上传，如果网络慢会阻塞几秒。
-        # 考虑到是 5分钟一次，通常没问题。
-        upload_to_oss(LOCAL_FILE)
+        # 4. 上传到 OSS
+        # 注意：local_path 传完整路径，oss_path 依然保持原来的结构
+        oss_path = f"milkyway/{now.year}/{now.month:02d}/{filename}"
+        upload_to_oss(local_full_path, oss_path)
 
     except Exception as e:
-        print(f"Error occurred: {e}")
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":
-    print("=== Milky Way Idle Market Watcher Started ===")
-    print(f"Local File: {LOCAL_FILE}")
-    print(f"Target OSS: {OSS_BUCKET_NAME} -> {OSS_OBJECT_KEY}")
-    # 注意：我注释掉了“启动时先跑一次”这行
-    # 因为启动的那一刻秒数不一定是 0，为了严格对齐 :00，我们等待调度器触发第一次
-    # fetch_and_store_data()
-    # 设定规则：每分钟的第 :00 秒执行
-    # 比如现在是 14:00:25 启动，它会在 14:01:00 执行第一次
+    print("=== Milky Way Idle Crawler (GZIP + Folder) ===")
+    print(f"Data will be saved to: ./{LOCAL_DATA_DIR}/")
+    print("Waiting for next minute start (:00)...")
+
+    # 严格在每分钟的第 00 秒执行
     schedule.every().minute.at(":00").do(fetch_and_store_data)
-    print("Waiting for the next minute start (xx:xx:00) to execute...")
+
     while True:
         schedule.run_pending()
-        # 为了更精准地捕捉到 :00 秒，建议将检测间隔从 1秒 改为 0.1秒 或 0.5秒
         time.sleep(0.1)

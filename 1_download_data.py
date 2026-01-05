@@ -1,51 +1,124 @@
 import os
 import oss2
+import pandas as pd
+from glob import glob
 from dotenv import load_dotenv
 from colorama import init, Fore
 
-# 初始化
 init(autoreset=True)
-load_dotenv()  # 加载本地 .env 文件
+load_dotenv()
 
-# === 配置 ===
+# ================= 配置区域 =================
+# OSS 配置
 OSS_BUCKET_NAME = 'milky-way-idle-oss'
-OSS_ENDPOINT = 'oss-cn-shanghai.aliyuncs.com'  # 你的 Endpoint
-OSS_OBJECT_KEY = 'milkyway/market_history.csv'  # 云端路径
-LOCAL_SAVE_PATH = 'data/market_history.csv'  # 本地保存路径
+OSS_ENDPOINT = 'oss-cn-shanghai.aliyuncs.com'
+
+# 路径配置
+LOCAL_TEMP_DIR = 'data/temp_daily'  # 临时存放下载的压缩包
+FINAL_CSV_PATH = 'data/market_history.csv'  # 最终生成的单一整合大文件
 
 
-def download_from_oss():
+# ===========================================
+
+def download_and_merge():
     ak = os.getenv('demos_oss_ak')
     sk = os.getenv('demos_oss_sk')
 
     if not ak or not sk:
-        print(Fore.RED + "错误: 未找到环境变量 demos_oss_ak 或 demos_oss_sk")
+        print(Fore.RED + "Error: 请在环境变量或 .env 设置 demos_oss_ak 和 demos_oss_sk")
         return
 
-    # 确保本地目录存在
-    os.makedirs(os.path.dirname(LOCAL_SAVE_PATH), exist_ok=True)
+    # 1. 准备目录
+    os.makedirs(LOCAL_TEMP_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(FINAL_CSV_PATH), exist_ok=True)
 
-    print(Fore.CYAN + f"正在连接 OSS: {OSS_BUCKET_NAME}...")
+    print(Fore.CYAN + "=== 1. 开始从 OSS 下载增量数据 ===")
     try:
         auth = oss2.Auth(ak, sk)
         bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET_NAME)
 
-        # 检查文件是否存在
-        if not bucket.object_exists(OSS_OBJECT_KEY):
-            print(Fore.RED + "错误: 云端文件不存在！请确认服务器脚本是否已运行并上传。")
-            return
+        # 遍历云端文件
+        download_count = 0
+        for obj in oss2.ObjectIterator(bucket, prefix='milkyway/'):
+            if not obj.key.endswith('.csv.gz'):
+                continue
 
-        # 下载
-        print(Fore.YELLOW + "开始下载数据...")
-        bucket.get_object_to_file(OSS_OBJECT_KEY, LOCAL_SAVE_PATH)
+            filename = os.path.basename(obj.key)
+            local_path = os.path.join(LOCAL_TEMP_DIR, filename)
 
-        file_size = os.path.getsize(LOCAL_SAVE_PATH) / 1024
-        print(Fore.GREEN + f"下载成功！文件保存在: {LOCAL_SAVE_PATH}")
-        print(Fore.GREEN + f"文件大小: {file_size:.2f} KB")
+            # 简单的增量策略：如果本地已经有这个文件，且大小一样，就跳过
+            # (如果需要确保绝对最新，可以注释掉下面这两行)
+            if os.path.exists(local_path) and os.path.getsize(local_path) == obj.size:
+                continue
+
+            print(f"下载: {filename} ...")
+            bucket.get_object_to_file(obj.key, local_path)
+            download_count += 1
+
+        if download_count == 0:
+            print(Fore.GREEN + "本地文件已是最新，无需下载。")
+        else:
+            print(Fore.GREEN + f"成功下载 {download_count} 个新文件。")
 
     except Exception as e:
-        print(Fore.RED + f"下载失败: {e}")
+        print(Fore.RED + f"下载出错: {e}")
+        return
+
+    # 2. 合并与转换
+    print(Fore.CYAN + "\n=== 2. 开始解压并合并为 market_history.csv ===")
+
+    gz_files = sorted(glob(os.path.join(LOCAL_TEMP_DIR, "market_*.csv.gz")))
+    if not gz_files:
+        print(Fore.RED + "临时目录没有找到任何 .csv.gz 文件")
+        return
+
+    df_list = []
+    print(f"正在处理 {len(gz_files)} 个压缩文件...")
+
+    for f in gz_files:
+        try:
+            # Pandas 自动处理 gzip 解压
+            df = pd.read_csv(f, compression='gzip')
+            df_list.append(df)
+        except Exception as e:
+            print(Fore.YELLOW + f"警告: 文件 {f} 读取失败，已跳过。原因: {e}")
+
+    if not df_list:
+        return
+
+    # 合并所有天的数据
+    full_df = pd.concat(df_list, ignore_index=True)
+
+    # 3. 数据清洗与还原 (适配旧脚本的关键步骤！)
+    print("正在还原列名和格式...")
+
+    # 将服务器的缩写列名 (t, i, l, a, b) 还原为全称
+    # 如果有些老文件已经是全称了，rename 也是安全的
+    full_df = full_df.rename(columns={
+        't': 'timestamp',
+        'i': 'item',
+        'l': 'level',
+        'a': 'ask',
+        'b': 'bid'
+    })
+
+    # 确保生成 datetime 列 (你的训练脚本可能用到)
+    if 'datetime' not in full_df.columns:
+        full_df['datetime'] = pd.to_datetime(full_df['timestamp'], unit='s')
+
+    # 按时间排序，保证数据连贯
+    full_df = full_df.sort_values('timestamp')
+
+    # 4. 保存为单一 CSV
+    print(f"正在保存到 {FINAL_CSV_PATH} ...")
+    full_df.to_csv(FINAL_CSV_PATH, index=False)
+
+    file_size_mb = os.path.getsize(FINAL_CSV_PATH) / (1024 * 1024)
+    print(Fore.GREEN + f"✅ 处理完成！")
+    print(Fore.GREEN + f"总行数: {len(full_df)}")
+    print(Fore.GREEN + f"文件大小: {file_size_mb:.2f} MB")
+    print(Fore.GREEN + f"路径: {os.path.abspath(FINAL_CSV_PATH)}")
 
 
 if __name__ == "__main__":
-    download_from_oss()
+    download_and_merge()
