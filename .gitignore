@@ -11,4 +11,3 @@ clean_history.sh
 cronjob.log
 /.cadence
 /.idea
-/data
