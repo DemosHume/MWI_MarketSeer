@@ -86,7 +86,8 @@ def fetch_and_store_data():
     if last_processed_timestamp is None:
         last_processed_timestamp = get_latest_timestamp_from_file(local_full_path)
         if last_processed_timestamp:
-            print(f"[Init] Loaded last timestamp from file: {last_processed_timestamp}")
+            ts_str = datetime.fromtimestamp(int(last_processed_timestamp)).strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[Init] Loaded last timestamp from file: {last_processed_timestamp} ({ts_str})")
         else:
             print(f"[Init] No local data found, starting fresh.")
 
@@ -98,7 +99,8 @@ def fetch_and_store_data():
 
         # 对比 API 时间戳 和 本地/内存记录的时间戳
         if last_processed_timestamp is not None and current_data_timestamp == last_processed_timestamp:
-            print(f"Skipped. (Timestamp {current_data_timestamp} already exists)")
+            ts_str = datetime.fromtimestamp(int(current_data_timestamp)).strftime('%Y-%m-%d %H:%M:%S')
+            print(f"Skipped. (Timestamp {current_data_timestamp} ({ts_str}) already exists)")
             return
 
         market_data = data.get("marketData", {})
@@ -132,7 +134,8 @@ def fetch_and_store_data():
             compression='gzip'
         )
 
-        print(f"Saved {len(records)} rows. (TS: {current_data_timestamp})")
+        ts_str = datetime.fromtimestamp(int(current_data_timestamp)).strftime('%Y-%m-%d %H:%M:%S')
+        print(f"Saved {len(records)} rows. (TS: {current_data_timestamp} ({ts_str}))")
 
         # 更新内存记录
         last_processed_timestamp = current_data_timestamp
