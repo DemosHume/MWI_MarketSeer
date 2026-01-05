@@ -127,13 +127,14 @@ if __name__ == "__main__":
     print("=== Milky Way Idle Market Watcher Started ===")
     print(f"Local File: {LOCAL_FILE}")
     print(f"Target OSS: {OSS_BUCKET_NAME} -> {OSS_OBJECT_KEY}")
-
-    # 启动时先跑一次
-    fetch_and_store_data()
-
-    # 设定定时任务 (每5分钟)
-    schedule.every(5).minutes.do(fetch_and_store_data)
-
+    # 注意：我注释掉了“启动时先跑一次”这行
+    # 因为启动的那一刻秒数不一定是 0，为了严格对齐 :00，我们等待调度器触发第一次
+    # fetch_and_store_data()
+    # 设定规则：每分钟的第 :00 秒执行
+    # 比如现在是 14:00:25 启动，它会在 14:01:00 执行第一次
+    schedule.every().minute.at(":00").do(fetch_and_store_data)
+    print("Waiting for the next minute start (xx:xx:00) to execute...")
     while True:
         schedule.run_pending()
-        time.sleep(1)
+        # 为了更精准地捕捉到 :00 秒，建议将检测间隔从 1秒 改为 0.1秒 或 0.5秒
+        time.sleep(0.1)
