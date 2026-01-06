@@ -128,8 +128,10 @@ def download_and_merge():
     full_df.to_csv(FINAL_CSV_PATH, index=False)
 
     file_size_mb = os.path.getsize(FINAL_CSV_PATH) / (1024 * 1024)
+    latest_time = full_df['datetime'].max()
     print(Fore.GREEN + f"✅ 处理完成！")
     print(Fore.GREEN + f"有效时间戳数量: {total_timestamps}")
+    print(Fore.GREEN + f"最近记录时间: {latest_time}")
     print(Fore.GREEN + f"总行数: {len(full_df)}")
     print(Fore.GREEN + f"文件大小: {file_size_mb:.2f} MB")
     print(Fore.GREEN + f"路径: {os.path.abspath(FINAL_CSV_PATH)}")
