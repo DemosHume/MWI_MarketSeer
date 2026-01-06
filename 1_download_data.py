@@ -24,11 +24,11 @@ MAX_TIMESTAMPS = 500  # 至多保留最近多少个时间戳的数据，设置�
 # ===========================================
 
 def download_and_merge():
-    ak = os.getenv('demos_oss_ak')
-    sk = os.getenv('demos_oss_sk')
+    ak = os.getenv('mwi_oss_ak')
+    sk = os.getenv('mwi_oss_sk')
 
     if not ak or not sk:
-        print(Fore.RED + "Error: 请在环境变量或 .env 设置 demos_oss_ak 和 demos_oss_sk")
+        print(Fore.RED + "Error: 请在环境变量或 .env 设置 mwi_oss_ak 和 mwi_oss_sk")
         return
 
     # 1. 准备目录

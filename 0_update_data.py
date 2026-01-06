@@ -7,8 +7,8 @@ import oss2
 from datetime import datetime
 
 # ================= 配置区域 =================
-OSS_AK = os.getenv('demos_oss_ak')
-OSS_SK = os.getenv('demos_oss_sk')
+OSS_AK = os.getenv('mwi_oss_ak')
+OSS_SK = os.getenv('mwi_oss_sk')
 
 OSS_BUCKET_NAME = 'milky-way-idle-oss'
 OSS_ENDPOINT = 'oss-cn-shanghai.aliyuncs.com'
