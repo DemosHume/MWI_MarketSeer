@@ -1,8 +1,10 @@
 import joblib
 import os
+import numpy as np
 from xgboost import XGBRegressor
 from sklearn.model_selection import train_test_split
 from colorama import init, Fore
+from tqdm import tqdm
 from utils.utils import load_clean_data, extract_features, prepare_item_data
 
 init(autoreset=True)
@@ -11,6 +13,7 @@ init(autoreset=True)
 DATA_PATH = 'data/market_history.csv'
 MODEL_DIR = 'models'
 MIN_SAMPLES = 10  # 最小训练样本数
+VAL_ROWS = 5      # 最后 N 行用于验证
 MAX_ITEMS = None  # 设置为 None 则训练所有物品
 
 def train_all_models():
@@ -38,9 +41,10 @@ def train_all_models():
         print(f"👉 建议: 请让爬虫继续运行一段时间，建议积累 30 行以上数据后再训练。")
 
     success_count = 0
-    print("开始遍历物品...")
+    total_mae = 0
     
-    for item_id in all_item_ids:
+    pbar = tqdm(all_item_ids, desc="训练模型", unit="item")
+    for item_id in pbar:
         try:
             # 准备该物品的数据
             data = prepare_item_data(item_id, returns_df, market_features)
@@ -55,26 +59,41 @@ def train_all_models():
             X = data.drop(columns=['target'])
             y = data['target']
 
-            # 训练模型 (不打乱顺序)
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+            # 训练模型 (保留最后 VAL_ROWS 行用于验证)
+            # 如果总样本数太少，自动调整验证集大小
+            current_val_size = min(VAL_ROWS, len(data) // 4)
+            if current_val_size < 1: current_val_size = 1
+            
+            X_train = X.iloc[:-current_val_size]
+            y_train = y.iloc[:-current_val_size]
+            X_test = X.iloc[-current_val_size:]
+            y_test = y.iloc[-current_val_size:]
             
             model = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
             model.fit(X_train, y_train)
 
+            # 验证性能
+            preds = model.predict(X_test)
+            mae = np.mean(np.abs(preds - y_test))
+            total_mae += mae
+            success_count += 1
+
             # 保存
             model_path = os.path.join(MODEL_DIR, f'{item_id}.pkl')
             joblib.dump(model, model_path)
-            success_count += 1
             
+            # 更新进度条描述
             if success_count % 10 == 0:
-                print(Fore.GREEN + f"已成功训练 {success_count} 个模型...")
+                pbar.set_postfix({"成功": success_count, "Avg MAE": f"{total_mae/success_count:.4f}"})
 
         except Exception as e:
             # print(f"训练 {item_id} 出错: {e}")
             continue
 
     print(Fore.GREEN + f"\n=== 训练完成 ===")
-    print(f"成功训练物品数: {success_count}")
+    if success_count > 0:
+        print(f"成功训练物品数: {success_count}")
+        print(f"平均验证误差 (MAE): {total_mae / success_count:.6f}")
     print(f"模型保存在: {MODEL_DIR}")
 
 if __name__ == "__main__":
