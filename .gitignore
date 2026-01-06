@@ -12,3 +12,4 @@ cronjob.log
 /.cadence
 /.idea
 /models
+.env
