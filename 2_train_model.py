@@ -69,7 +69,14 @@ def train_all_models():
             X_test = X.iloc[-current_val_size:]
             y_test = y.iloc[-current_val_size:]
             
-            model = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
+            model = XGBRegressor(
+                n_estimators=50,
+                learning_rate=0.05,
+                max_depth=2,
+                reg_alpha=0.5,
+                reg_lambda=0.5,
+                random_state=42
+            )
             model.fit(X_train, y_train)
 
             # 验证性能
