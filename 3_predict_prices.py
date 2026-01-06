@@ -1,81 +1,88 @@
 import pandas as pd
-import numpy as np
 import joblib
 import os
 from colorama import init, Fore
 
 init(autoreset=True)
 
+from utils.utils import load_clean_data, extract_features, prepare_item_data
+
 # === 配置 ===
 DATA_PATH = 'data/market_history.csv'
-MODEL_PATH = 'models/abyssal_essence_lv0.pkl'  # 对应刚才训练的模型
-TARGET_ITEM = 'abyssal_essence'
-TARGET_LEVEL = 0
+MODEL_DIR = 'models'
 
-
-def predict_future():
-    # 1. 加载模型
-    if not os.path.exists(MODEL_PATH):
-        print(Fore.RED + "模型文件不存在，请先运行 2_train_model.py")
+def predict_all():
+    # 1. 加载最新数据并提取特征
+    print(Fore.CYAN + "正在加载数据...")
+    pivot_df = load_clean_data(DATA_PATH)
+    if pivot_df is None or len(pivot_df) < 5:
+        print(Fore.RED + "数据不足，无法预测")
         return
 
-    model = joblib.load(MODEL_PATH)
-
-    # 2. 加载最新数据
-    df = pd.read_csv(DATA_PATH)
-
-    # 3. 提取特定物品的最后一段数据来构造特征
-    df_item = df[(df['item'] == TARGET_ITEM) & (df['level'] == TARGET_LEVEL)].copy()
-
-    # 数据清洗
-    df_item['ask'] = df_item['ask'].replace(-1, np.nan).ffill().fillna(0)
-
-    # 我们需要最后一行数据来进行预测
-    # 但是为了计算 MA12，我们需要至少最后12行数据
-    if len(df_item) < 15:
-        print(Fore.RED + "数据量太少，无法计算指标")
+    returns_df, market_features = extract_features(pivot_df, n_components=5)
+    
+    # 2. 扫描所有模型
+    if not os.path.exists(MODEL_DIR):
+        print(Fore.RED + "模型目录不存在，请先运行 2_train_model.py")
+        return
+    
+    model_files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.pkl')]
+    if not model_files:
+        print(Fore.RED + "没有找到任何训练好的模型")
         return
 
-    # 重新计算特征 (逻辑必须与训练时完全一致!)
-    last_rows = df_item.tail(20).copy()  # 取最后20行计算指标
+    print(f"找到 {len(model_files)} 个模型，正在进行批量预测...")
+    
+    results = []
+    
+    # 获取最后一个时间点的特征
+    for f in model_files:
+        item_id = f.replace('.pkl', '')
+        model_path = os.path.join(MODEL_DIR, f)
+        
+        try:
+            model = joblib.load(model_path)
+            
+            # 准备该物品的最新特征行
+            data = prepare_item_data(item_id, returns_df, market_features)
+            if data is None or len(data) == 0:
+                continue
+                
+            # 取最后一行特征进行预测
+            latest_X = data.drop(columns=['target']).iloc[[-1]]
+            pred_return = model.predict(latest_X)[0]
+            
+            # 获取当前价格
+            current_price = pivot_df[item_id].iloc[-1]
+            
+            results.append({
+                'item_id': item_id,
+                'current_price': current_price,
+                'pred_return_pct': pred_return * 100
+            })
+        except Exception as e:
+            continue
 
-    last_rows['lag_1'] = last_rows['ask'].shift(1)
-    last_rows['lag_2'] = last_rows['ask'].shift(2)
-    last_rows['lag_3'] = last_rows['ask'].shift(3)
-    last_rows['MA5'] = last_rows['ask'].rolling(window=5).mean()
-    last_rows['MA12'] = last_rows['ask'].rolling(window=12).mean()
-    last_rows['std_5'] = last_rows['ask'].rolling(window=5).std()
+    # 3. 排序并展示结果
+    res_df = pd.DataFrame(results)
+    if res_df.empty:
+        print(Fore.YELLOW + "没有预测结果")
+        return
+        
+    res_df = res_df.sort_values('pred_return_pct', ascending=False)
 
-    # 获取最后一行 (包含最新时刻的所有特征)
-    latest_features = last_rows.iloc[[-1]][['ask', 'lag_1', 'lag_2', 'lag_3', 'MA5', 'MA12', 'std_5']]
+    print("\n" + Fore.GREEN + "=== 市场预测涨跌榜 (Top 10 看涨) ===")
+    print(f"{'物品ID':<30} | {'当前价':<10} | {'预测涨幅':<10}")
+    print("-" * 55)
+    
+    for _, row in res_df.head(10).iterrows():
+        color = Fore.GREEN if row['pred_return_pct'] > 0 else Fore.WHITE
+        print(color + f"{row['item_id']:<30} | {row['current_price']:>10.1f} | {row['pred_return_pct']:>9.2f}%")
 
-    current_price = latest_features.iloc[0]['ask']
-    current_time = last_rows.iloc[-1]['datetime']
-
-    # 4. 预测
-    predicted_price = model.predict(latest_features)[0]
-
-    # 5. 输出决策建议
-    change_percent = ((predicted_price - current_price) / current_price) * 100
-
-    print(Fore.CYAN + "=" * 30)
-    print(f"物品: {TARGET_ITEM} (Lv{TARGET_LEVEL})")
-    print(f"数据时间: {current_time}")
-    print(f"当前卖价: {current_price:,.0f}")
-    print(Fore.YELLOW + f"预测下个周期价格: {predicted_price:,.0f}")
-
-    print("-" * 20)
-    if change_percent > 1.0:
-        print(Fore.GREEN + f"🚀 趋势: 强力看涨 (+{change_percent:.2f}%)")
-        print("建议: 考虑买入")
-    elif change_percent < -1.0:
-        print(Fore.RED + f"📉 趋势: 强力看跌 ({change_percent:.2f}%)")
-        print("建议: 观望或抛售")
-    else:
-        print(Fore.WHITE + f"➡️ 趋势: 震荡 (波动 {change_percent:.2f}%)")
-        print("建议: 保持持有")
-    print(Fore.CYAN + "=" * 30)
-
+    print("\n" + Fore.RED + "=== 市场预测跌幅榜 (Top 10 看跌) ===")
+    for _, row in res_df.tail(10).iterrows():
+        color = Fore.RED if row['pred_return_pct'] < 0 else Fore.WHITE
+        print(color + f"{row['item_id']:<30} | {row['current_price']:>10.1f} | {row['pred_return_pct']:>9.2f}%")
 
 if __name__ == "__main__":
-    predict_future()
+    predict_all()
