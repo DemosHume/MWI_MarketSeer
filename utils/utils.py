@@ -23,10 +23,14 @@ def load_clean_data(data_path):
         df['ask'] = df['ask'].replace(-1, np.nan)
 
     # 【策略 1】价差过滤 (Spread Filter)
-    # 如果 Ask 是 Bid 的好几倍，说明 Ask 可能是虚高的“钓鱼价”
+    # 过滤掉“毫无诚意”的报价（如 100万的苹果 或 5块钱的手机）
+    # 在正常市场中，Ask 应该略高于 Bid。如果两者比例失调，说明数据异常。
+    # 用户指出：Ask 不可能比 Bid 高出很多倍（会自动成交），Bid 超过 Ask 太多也是异常。
     if 'ask' in df.columns and 'bid' in df.columns:
-        max_spread_ratio = 5
-        bad_spread_mask = (df['bid'] > 0) & (df['ask'] > df['bid'] * max_spread_ratio)
+        max_ratio = 1.5  # 最大允许的价差比例
+        # 只要 Ask/Bid 或 Bid/Ask 超过阈值，就视为异常
+        bad_spread_mask = (df['bid'] > 0) & (df['ask'] > 0) & \
+                         ((df['ask'] > df['bid'] * max_ratio) | (df['bid'] > df['ask'] * max_ratio))
         df.loc[bad_spread_mask, 'ask'] = np.nan
 
     # 3. 去重
