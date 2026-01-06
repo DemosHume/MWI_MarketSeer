@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 init(autoreset=True)
 
-from utils.utils import load_clean_data, extract_features, prepare_item_data
+from utils.utils import load_clean_data, extract_features, prepare_item_data, prepare_predict_data
 
 # === 配置 ===
 DATA_PATH = 'data/market_history.csv'
@@ -35,7 +35,14 @@ def predict_all():
 
     print(f"找到 {len(model_files)} 个模型，正在进行批量预测...")
     
+    # 获取最新的 bid 价格用于差价过滤
+    raw_df = pd.read_csv(DATA_PATH)
+    raw_df['id'] = raw_df['item'] + "_lv" + raw_df['level'].astype(str)
+    latest_ts = pivot_df.index[-1]
+    latest_bids = raw_df[raw_df['timestamp'] == latest_ts].set_index('id')['bid'].to_dict()
+
     results = []
+    filtered_by_spread = 0
     
     # 获取最后一个时间点的特征
     pbar = tqdm(model_files, desc="批量预测", unit="model")
@@ -58,27 +65,26 @@ def predict_all():
             val_error = val_pred - val_actual
 
             # 2. 准备未来预测特征 (最新的特征，尚无 target)
-            # 我们直接从 returns_df 和 market_features 拼接最新的一行
-            # 这部分逻辑其实就是 prepare_item_data 内部 X 的逻辑，但取最后一行
-            item_ret = returns_df[item_id]
-            lookback = 3 # 保持与 prepare_item_data 一致
-            
-            # 手动构造最新一行的滞后特征
-            latest_lags = [item_ret.iloc[-i-1] for i in range(lookback)]
-            latest_market = market_features.iloc[-1].values
-            
-            # 拼接特征向量
-            # 特征顺序: lag_0, lag_1, lag_2, market_ret, pca_0, pca_1, pca_2, pca_3, pca_4
-            latest_feat_array = np.array(latest_lags + list(latest_market)).reshape(1, -1)
-            
-            # 将 numpy 数组转回 DataFrame 以保持特征名一致 (如果 XGBoost 训练时用了特征名)
-            feature_names = [f'lag_{i}' for i in range(lookback)] + market_features.columns.tolist()
-            latest_X_future = pd.DataFrame(latest_feat_array, columns=feature_names)
-            
+            latest_X_future = prepare_predict_data(item_id, returns_df, market_features)
+            if latest_X_future is None:
+                continue
+                
             pred_future_return = model.predict(latest_X_future)[0]
             
-            # 获取当前价格
+            # 获取当前价格 (Ask)
             current_price = pivot_df[item_id].iloc[-1]
+            bid_price = latest_bids.get(item_id, -1)
+            
+            # 3. 差价过滤: 买卖价差异超过 20% 的不显示 (Ask > Bid * 1.2)
+            # 如果没有买单 (bid <= 0) 或差价太大，则跳过
+            if bid_price <= 0:
+                filtered_by_spread += 1
+                continue
+            
+            spread_ratio = (current_price - bid_price) / bid_price
+            if spread_ratio > 0.2:
+                filtered_by_spread += 1
+                continue
             
             results.append({
                 'item_id': item_id,
@@ -93,6 +99,9 @@ def predict_all():
             continue
 
     # 3. 排序并展示结果
+    if filtered_by_spread > 0:
+        print(Fore.YELLOW + f"提示: 已从排行榜中剔除 {filtered_by_spread} 个买卖价差过大(>20%)的商品")
+        
     res_df = pd.DataFrame(results)
     if res_df.empty:
         print(Fore.YELLOW + "没有预测结果")
