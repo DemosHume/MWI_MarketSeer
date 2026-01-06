@@ -1,15 +1,25 @@
-MilkyBot.py
-MilkAndCookies.py
-updateme.sh
-.ipynb_checkpoints/*
-node_modules/*
-package.json
-package-lock.json
-tsconfig.json
-cookies.json
-clean_history.sh
-cronjob.log
-/.cadence
-/.idea
-/models
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
 .env
+.venv
+venv
+env/
+venv.bak/
+ENV/
+
+# IDEs
+.idea/
+.vscode/
+.ipynb_checkpoints/
+
+# Project specific
+/models/
+/data/temp_daily/
+
+# OS
+.DS_Store
+Thumbs.db
