@@ -202,10 +202,30 @@ def predict_all():
         if has_no_model:
             print(Fore.YELLOW + "注: [?] 表示该商品价格长期无波动，模型未训练。")
 
-    # 打印总体验证表现
+    # 打印总体验证报告
+    time_span_min = (pd.to_datetime(pivot_df.index.max(), unit='s') - pd.to_datetime(pivot_df.index.min(), unit='s')).total_seconds() / 60
+    avg_interval = time_span_min / (len(pivot_df) - 1) if len(pivot_df) > 1 else 0
+    
+    print(f"\n--- 市场数据深度诊断 ---")
+    print(f"数据点总量: {len(pivot_df)} 个时间戳")
+    print(f"时间跨度: {time_span_min/60:.1f} 小时")
+    print(f"平均采样频率: {avg_interval:.1f} 分钟/样本")
+    
     if not res_df.empty:
         avg_val_err = res_df['recent_mae_pct'].mean()
-        print(f"\n全市场模型平均验证误差 (最近10期): {avg_val_err:.2f}%")
+        print(f"当前模型平均验证误差 (MAE): {avg_val_err:.2f}%")
+        
+        if len(pivot_df) < 200:
+             print(Fore.YELLOW + "建议: 样本量较少。随着数据点积累（建议 > 500个），模型对波动的捕获将更稳健。")
+    else:
+        if len(pivot_df) < 50:
+            print(Fore.RED + "警告: 采样点严重不足。模型目前处于'冷启动'状态，预测信号大多被噪声淹没。")
+        else:
+            print(Fore.YELLOW + "提示: 市场波动相对于采样频率过小，当前所有预测信号均不可靠。")
+    
+    if avg_interval > 15:
+        print(Fore.CYAN + f"提示: 当前采样间隔较大({avg_interval:.1f}min)，模型更倾向于捕捉长线趋势。若需短线精准预测，请提高爬虫频率。")
+    print(f"------------------------")
 
 if __name__ == "__main__":
     predict_all()

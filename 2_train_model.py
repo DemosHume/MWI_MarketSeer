@@ -41,6 +41,9 @@ def train_all_models():
         print(f"👉 建议: 请让爬虫继续运行一段时间，建议积累 30 行以上数据后再训练。")
 
     success_count = 0
+    skip_insufficient_samples = 0
+    skip_no_volatility = 0
+    skip_error = 0
     total_mae = 0
     
     pbar = tqdm(all_item_ids, desc="训练模型", unit="item")
@@ -50,10 +53,12 @@ def train_all_models():
             data = prepare_item_data(item_id, returns_df, market_features)
             
             if data is None or len(data) < MIN_SAMPLES:
+                skip_insufficient_samples += 1
                 continue
             
             # 检查是否有波动
             if data['target'].nunique() <= 1:
+                skip_no_volatility += 1
                 continue
 
             X = data.drop(columns=['target'])
@@ -77,12 +82,12 @@ def train_all_models():
                 reg_lambda=1.0,
                 random_state=42,
                 n_jobs=-1,
-                eval_metric='mae'
+                eval_metric='mae',
+                early_stopping_rounds=10
             )
             model.fit(
                 X_train, y_train,
                 eval_set=[(X_test, y_test)],
-                early_stopping_rounds=10,
                 verbose=False
             )
 
@@ -101,13 +106,18 @@ def train_all_models():
                 pbar.set_postfix({"成功": success_count, "Avg MAE": f"{total_mae/success_count:.4f}"})
 
         except Exception as e:
-            # print(f"训练 {item_id} 出错: {e}")
+            skip_error += 1
             continue
 
     print(Fore.GREEN + f"\n=== 训练完成 ===")
+    print(f"成功训练物品数: {success_count}")
     if success_count > 0:
-        print(f"成功训练物品数: {success_count}")
         print(f"平均验证误差 (MAE): {total_mae / success_count:.6f}")
+    
+    print(f"跳过详情:")
+    print(f"  - 样本不足 (<{MIN_SAMPLES}行): {skip_insufficient_samples}")
+    print(f"  - 价格无波动: {skip_no_volatility}")
+    print(f"  - 训练报错: {skip_error}")
     print(f"模型保存在: {MODEL_DIR}")
 
 if __name__ == "__main__":
