@@ -65,6 +65,7 @@ MWI MarketSeer 是一个专为 **Milky Way Idle** 游戏设计的市场数据分
 
 3.  **训练模型 (`2_train_model.py`)**：
     对市场中的稳定物品进行批量建模。完成后模型将保存在 `models/` 目录。
+    *提示：建议在积累了至少 100 个以上的时间点后再进行训练，以获得更准的效果。*
     ```bash
     python 2_train_model.py
     ```

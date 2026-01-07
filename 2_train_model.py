@@ -12,8 +12,8 @@ init(autoreset=True)
 # === 配置 ===
 DATA_PATH = 'data/market_history.csv'
 MODEL_DIR = 'models'
-MIN_SAMPLES = 10  # 最小训练样本数
-VAL_ROWS = 5      # 最后 N 行用于验证
+MIN_SAMPLES = 10  # 恢复到较小值以便在初期数据上也能训练
+VAL_ROWS = 60      # 使用最后 1 小时的数据作为验证集 (假设 1min/row)
 MAX_ITEMS = None  # 设置为 None 则训练所有物品
 
 def train_all_models():
@@ -70,14 +70,21 @@ def train_all_models():
             y_test = y.iloc[-current_val_size:]
             
             model = XGBRegressor(
-                n_estimators=50,
+                n_estimators=100,
                 learning_rate=0.05,
-                max_depth=2,
-                reg_alpha=0.5,
-                reg_lambda=0.5,
-                random_state=42
+                max_depth=3,
+                reg_alpha=1.0,
+                reg_lambda=1.0,
+                random_state=42,
+                n_jobs=-1,
+                eval_metric='mae'
             )
-            model.fit(X_train, y_train)
+            model.fit(
+                X_train, y_train,
+                eval_set=[(X_test, y_test)],
+                early_stopping_rounds=10,
+                verbose=False
+            )
 
             # 验证性能
             preds = model.predict(X_test)

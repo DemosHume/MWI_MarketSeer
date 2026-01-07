@@ -56,15 +56,21 @@ def load_clean_data(data_path):
         pivot_df[deviation_mask] = np.nan
 
     # ==========================================
-    # 【新增逻辑】严格过滤：剔除包含无效记录 (NaN/插针) 的物品
+    # 【新增逻辑】改进过滤：允许少量空缺，并进行插值填充
     # ==========================================
     original_count = pivot_df.shape[1]
 
-    # dropna(axis=1) 表示：如果这一列(axis=1)里有任何一个NaN，就删掉整列
-    pivot_df = pivot_df.dropna(axis=1, how='any')
+    # 计算每个物品的缺失率
+    missing_rate = pivot_df.isnull().sum() / len(pivot_df)
+    # 允许最多 10% 的数据缺失（可根据需要调整）
+    keep_cols = missing_rate[missing_rate <= 0.1].index
+    pivot_df = pivot_df[keep_cols]
+
+    # 对选中的物品进行前向填充和后向填充（处理插针或短暂缺货产生的 NaN）
+    pivot_df = pivot_df.ffill().bfill()
 
     filtered_count = pivot_df.shape[1]
-    print(f"数据清洗: 已剔除包含缺货记录的物品 {original_count - filtered_count} 个，剩余 {filtered_count} 个稳定物品。")
+    print(f"数据清洗: 物品总数 {original_count} -> 过滤缺失率后剩余 {filtered_count}。")
 
     # 5. 检查数据长度
     # 如果行数太少，特征工程计算完就没有数据了
@@ -81,12 +87,13 @@ def load_clean_data(data_path):
 def extract_features(pivot_df, n_components=5):
     """
     特征工程：
-    1. 计算收益率
+    1. 计算对数收益率
     2. 计算市场大盘收益率
     3. PCA 降维
     4. 提取时间周期特征
     """
-    returns_df = pivot_df.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0)
+    # 使用对数收益率，比普通收益率更稳健，尤其是在价格跨度大时
+    returns_df = np.log(pivot_df).diff().replace([np.inf, -np.inf], np.nan).fillna(0)
     market_return = returns_df.mean(axis=1)
 
     # PCA
@@ -115,37 +122,45 @@ def extract_features(pivot_df, n_components=5):
     return returns_df, base_features
 
 
-def prepare_item_data(target_id, returns_df, base_features, lookback=3, horizon=1):
-    """
-    为物品准备数据，增加滚动波动率和动量。
-    """
+def _build_base_features(target_id, returns_df, base_features):
+    """内部辅助：构建物品的基础特征矩阵"""
     if target_id not in returns_df.columns: return None
     item_ret = returns_df[target_id]
+    
+    # 1. 多尺度滞后项 (分钟级数据)
+    # 包含短期（1,2,3）、中期（5,10,15）和长期（30,60）
+    lag_steps = [1, 2, 3, 5, 10, 15, 30, 60]
+    lags = pd.concat([item_ret.shift(i).rename(f'lag_{i}') for i in lag_steps if i < len(item_ret)], axis=1)
+    
+    # 2. 移动平均 (SMA) 与 价格偏离度
+    # 观察过去一段时间的平均收益率趋势
+    windows = [5, 15, 60]
+    moving_features = pd.DataFrame(index=returns_df.index)
+    for w in windows:
+        if len(item_ret) > w:
+            moving_features[f'sma_{w}'] = item_ret.rolling(window=w).mean()
+            moving_features[f'volatility_{w}'] = item_ret.rolling(window=w).std()
+            moving_features[f'momentum_{w}'] = item_ret.rolling(window=w).sum()
+    
+    # 3. 合并所有特征
+    X = pd.concat([lags, moving_features, base_features], axis=1).fillna(0)
+    return X, item_ret
 
-    # 1. 滞后项
-    lags = pd.concat([item_ret.shift(i).rename(f'lag_{i}') for i in range(lookback)], axis=1)
-
-    # 2. 波动率与动量
-    rolling = pd.DataFrame(index=returns_df.index)
-    rolling['volatility_3'] = item_ret.rolling(window=3).std()
-    rolling['momentum_3'] = item_ret.rolling(window=3).sum()
-    rolling = rolling.fillna(0)
-
-    # 3. 合并
-    X = pd.concat([lags, rolling, base_features], axis=1)
+def prepare_item_data(target_id, returns_df, base_features, horizon=1):
+    """为物品准备训练数据"""
+    res = _build_base_features(target_id, returns_df, base_features)
+    if res is None: return None
+    X, item_ret = res
+    
+    # 目标变量：未来收益率
     y = item_ret.shift(-horizon)
     data = pd.concat([X, y.rename('target')], axis=1).dropna()
-
+    
     return data if len(data) > 0 else None
 
-
-def prepare_predict_data(target_id, returns_df, base_features, lookback=3):
-    if target_id not in returns_df.columns: return None
-    item_ret = returns_df[target_id]
-    lags = pd.concat([item_ret.shift(i).rename(f'lag_{i}') for i in range(lookback)], axis=1)
-    rolling = pd.DataFrame(index=returns_df.index)
-    rolling['volatility_3'] = item_ret.rolling(window=3).std()
-    rolling['momentum_3'] = item_ret.rolling(window=3).sum()
-    rolling = rolling.fillna(0)
-    X = pd.concat([lags, rolling, base_features], axis=1)
+def prepare_predict_data(target_id, returns_df, base_features):
+    """为物品准备预测特征（最后一行）"""
+    res = _build_base_features(target_id, returns_df, base_features)
+    if res is None: return None
+    X, _ = res
     return X.iloc[[-1]]
